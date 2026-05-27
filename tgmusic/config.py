@@ -12,6 +12,9 @@ class Config:
     bot_token: str
     owner_id: int
     db_path: Path
+    web_host: str
+    web_port: int
+    cors_origin: str  # exact origin or "*"
 
 
 def load(env_file: str | Path = ".env") -> Config:
@@ -34,5 +37,15 @@ def load(env_file: str | Path = ".env") -> Config:
         raise RuntimeError(f"OWNER_ID must be a number, got: {raw_owner!r}") from e
 
     db_path = Path(os.environ.get("DB_PATH", "tgmusic.db")).expanduser().resolve()
+    web_host = os.environ.get("WEB_HOST", "127.0.0.1").strip()
+    web_port = int(os.environ.get("WEB_PORT", "8080"))
+    cors_origin = os.environ.get("CORS_ORIGIN", "*").strip()
 
-    return Config(bot_token=bot_token, owner_id=owner_id, db_path=db_path)
+    return Config(
+        bot_token=bot_token,
+        owner_id=owner_id,
+        db_path=db_path,
+        web_host=web_host,
+        web_port=web_port,
+        cors_origin=cors_origin,
+    )
