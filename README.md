@@ -77,18 +77,25 @@ tgmusic/
 
 ### Backend HTTP API (живёт внутри того же python-процесса)
 
-| Method | Path                    | Auth | Что делает                            |
-|--------|-------------------------|------|---------------------------------------|
-| GET    | `/health`               | —    | sanity check                          |
-| GET    | `/api/me`               | tma  | счётчики библиотеки                   |
-| GET    | `/api/tracks/recent`    | tma  | последние треки (`?limit=20`)         |
-| GET    | `/api/tracks/search`    | tma  | поиск (`?q=...&limit=30`)             |
-| GET    | `/api/artists`          | tma  | топ артистов (`?limit=100`)           |
-| POST   | `/api/play`             | tma  | `{track_id}` → sendAudio в чат owner-у |
+| Method | Path                          | Auth | Что делает                                                  |
+|--------|-------------------------------|------|-------------------------------------------------------------|
+| GET    | `/health`                     | —    | sanity check                                                |
+| GET    | `/api/me`                     | tma  | счётчики библиотеки                                         |
+| GET    | `/api/tracks/recent`          | tma  | последние треки (`?limit=20`)                               |
+| GET    | `/api/tracks/search`          | tma  | поиск (`?q=...&limit=30`)                                   |
+| GET    | `/api/artists`                | tma  | топ артистов (`?limit=100`)                                 |
+| POST   | `/api/play/url`               | tma  | `{track_id}` → `{url}` — подписанный URL для `<audio src>`  |
+| POST   | `/api/play/to-chat`           | tma  | `{track_id}` → sendAudio в чат (для фона через native player) |
+| GET    | `/api/stream/{id}?exp&sig`    | sig  | стрим аудио с Telegram CDN, поддержка Range                 |
 
-Все `/api/*` требуют заголовок `Authorization: tma <initData>`, где `initData`
-— подписанная строка от Telegram WebApp SDK. Бэк проверяет HMAC и сверяет
-`user.id` с `OWNER_ID`.
+`tma` = заголовок `Authorization: tma <initData>` (Telegram WebApp подписанные данные). Бэк проверяет HMAC и сверяет `user.id` с `OWNER_ID`.
+
+`sig` = подпись в query-параметрах (`exp` — unix timestamp, `sig` — HMAC-SHA256 от `track_id+exp` ключом `BOT_TOKEN`). Нужно потому что `<audio>` тег не умеет слать кастомные заголовки.
+
+**UX-модель:**
+- Тап на треке в Mini App → in-app плеер начинает играть (стрим через `<audio>`).
+- Кнопка ⤴ справа от трека → отправляет в чат для нативного плеера Telegram (фон, lockscreen, AirPods).
+- iOS Safari WebView вешает HTML5-аудио при потере фокуса, поэтому in-app плеер — для активного слушания, а ⤴ — для "положил в карман, побежал".
 
 ### Деплой Mini App на Cloudflare Pages
 
