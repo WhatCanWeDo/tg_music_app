@@ -1,7 +1,7 @@
 import { usePlayer } from "../player";
 
 export function Player() {
-  const { track, isPlaying, position, duration, loading, error, toggle, seek, close } =
+  const { track, thumbUrl, isPlaying, position, duration, loading, error, toggle, seek, close } =
     usePlayer();
 
   if (!track) return null;
@@ -14,6 +14,17 @@ export function Player() {
     <div className="fixed bottom-14 inset-x-0 border-t border-white/10 bg-(--color-surface)/95 backdrop-blur-md">
       <div className="px-4 pt-3 pb-2">
         <div className="flex items-center gap-3">
+          {thumbUrl ? (
+            <img
+              src={thumbUrl}
+              alt=""
+              className="size-11 rounded object-cover shrink-0"
+            />
+          ) : (
+            <div className="size-11 rounded bg-(--color-bg) flex items-center justify-center text-(--color-hint) shrink-0">
+              ♪
+            </div>
+          )}
           <button
             onClick={toggle}
             className="size-11 rounded-full bg-(--color-accent) text-(--color-accent-text) shrink-0 flex items-center justify-center text-lg active:scale-95 transition"

@@ -76,6 +76,12 @@ def make_stream_url(base: str, track_id: int, bot_token: str, ttl: int = STREAM_
     return f"{base}/api/stream/{track_id}?exp={exp}&sig={sig}"
 
 
+def make_thumb_url(base: str, track_id: int, bot_token: str, ttl: int = STREAM_URL_TTL) -> str:
+    exp = int(time.time()) + ttl
+    sig = _sign_stream(track_id, exp, bot_token)
+    return f"{base}/api/thumb/{track_id}?exp={exp}&sig={sig}"
+
+
 def _verify_stream_sig(track_id: int, exp: int, sig: str, bot_token: str) -> bool:
     expected = _sign_stream(track_id, exp, bot_token)
     return hmac.compare_digest(expected, sig)
@@ -85,7 +91,7 @@ def _verify_stream_sig(track_id: int, exp: int, sig: str, bot_token: str) -> boo
 # Middleware
 # ---------------------------------------------------------------------------
 
-PUBLIC_PREFIXES = ("/health", "/api/stream/")  # auth handled per-route
+PUBLIC_PREFIXES = ("/health", "/api/stream/", "/api/thumb/")  # auth handled per-route
 
 
 @web.middleware
@@ -191,8 +197,12 @@ async def play_url(request: web.Request) -> web.Response:
         raise web.HTTPNotFound(text=f"no track {track_id}")
 
     base = request.app["public_base_url"] or _derive_base(request)
-    url = make_stream_url(base, track.id, request.app["bot_token"])
-    return web.json_response({"url": url, "track_id": track.id})
+    token = request.app["bot_token"]
+    return web.json_response({
+        "track_id": track.id,
+        "url": make_stream_url(base, track.id, token),
+        "thumb_url": make_thumb_url(base, track.id, token) if track.thumb_file_id else None,
+    })
 
 
 async def play_to_chat(request: web.Request) -> web.Response:
@@ -212,32 +222,17 @@ async def play_to_chat(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "track_id": track_id})
 
 
-async def stream(request: web.Request) -> web.StreamResponse:
-    """Stream the underlying Telegram CDN audio file to the client.
-
-    Authenticated by signed query string (HMAC-SHA256 of track_id+exp keyed by
-    bot_token). <audio> tags can't send custom headers, so this bypasses the
-    initData auth middleware and uses a self-contained signature instead.
-    """
-    track_id = int(request.match_info["track_id"])
-    sig = request.query.get("sig", "")
-    try:
-        exp = int(request.query.get("exp", "0"))
-    except ValueError:
-        raise web.HTTPForbidden(text="bad exp")
-    bot_token: str = request.app["bot_token"]
-    if not _verify_stream_sig(track_id, exp, sig, bot_token):
-        raise web.HTTPForbidden(text="bad signature")
-    if exp < int(time.time()):
-        raise web.HTTPGone(text="url expired — refresh the page")
-
-    db: DB = request.app["db"]
-    track = await db.get(track_id)
-    if track is None:
-        raise web.HTTPNotFound()
-
+async def _proxy_telegram_file(
+    request: web.Request,
+    file_id: str,
+    *,
+    default_content_type: str,
+    cache_seconds: int,
+) -> web.StreamResponse:
+    """Stream a Telegram CDN file (audio or thumb) with Range passthrough."""
     bot: Bot = request.app["bot"]
-    tg_file = await bot.get_file(track.file_id)
+    bot_token: str = request.app["bot_token"]
+    tg_file = await bot.get_file(file_id)
     file_path = tg_file.file_path
     if not file_path:
         raise web.HTTPServiceUnavailable(text="Telegram returned no file_path")
@@ -252,18 +247,15 @@ async def stream(request: web.Request) -> web.StreamResponse:
     try:
         if upstream.status >= 400:
             text = await upstream.text()
-            log.warning("upstream %s for track %s: %s", upstream.status, track_id, text[:200])
+            log.warning("upstream %s for %s: %s", upstream.status, file_id, text[:200])
             raise web.HTTPBadGateway(text=f"Telegram CDN: {upstream.status}")
 
         response = web.StreamResponse(status=upstream.status)
-        response.headers["Content-Type"] = track.mime_type or "audio/mpeg"
-        response.headers["Accept-Ranges"] = "bytes"
-        response.headers["Cache-Control"] = "private, max-age=3600"
-        # Inline disposition with a sensible filename for "save as".
-        fname = track.file_name or f"track-{track.id}.mp3"
-        response.headers["Content-Disposition"] = (
-            f'inline; filename="{quote(fname.encode("ascii", "ignore").decode() or f"track-{track.id}.mp3")}"'
+        response.headers["Content-Type"] = upstream.headers.get(
+            "Content-Type", default_content_type
         )
+        response.headers["Accept-Ranges"] = "bytes"
+        response.headers["Cache-Control"] = f"private, max-age={cache_seconds}"
         for h in ("Content-Length", "Content-Range"):
             if h in upstream.headers:
                 response.headers[h] = upstream.headers[h]
@@ -275,6 +267,63 @@ async def stream(request: web.Request) -> web.StreamResponse:
         return response
     finally:
         upstream.release()
+
+
+def _verify_signed_request(request: web.Request, track_id: int) -> None:
+    sig = request.query.get("sig", "")
+    try:
+        exp = int(request.query.get("exp", "0"))
+    except ValueError:
+        raise web.HTTPForbidden(text="bad exp")
+    if not _verify_stream_sig(track_id, exp, sig, request.app["bot_token"]):
+        raise web.HTTPForbidden(text="bad signature")
+    if exp < int(time.time()):
+        raise web.HTTPGone(text="url expired — refresh the page")
+
+
+async def stream(request: web.Request) -> web.StreamResponse:
+    """Stream the underlying Telegram CDN audio file to the client.
+
+    Authenticated by signed query string (HMAC-SHA256 of track_id+exp keyed by
+    bot_token). <audio> tags can't send custom headers, so this bypasses the
+    initData auth middleware and uses a self-contained signature instead.
+    """
+    track_id = int(request.match_info["track_id"])
+    _verify_signed_request(request, track_id)
+
+    db: DB = request.app["db"]
+    track = await db.get(track_id)
+    if track is None:
+        raise web.HTTPNotFound()
+
+    response = await _proxy_telegram_file(
+        request,
+        track.file_id,
+        default_content_type=track.mime_type or "audio/mpeg",
+        cache_seconds=3600,
+    )
+    fname = track.file_name or f"track-{track.id}.mp3"
+    safe = fname.encode("ascii", "ignore").decode() or f"track-{track.id}.mp3"
+    response.headers["Content-Disposition"] = f'inline; filename="{quote(safe)}"'
+    return response
+
+
+async def thumb(request: web.Request) -> web.StreamResponse:
+    """Stream the track's cover art (Telegram audio thumbnail)."""
+    track_id = int(request.match_info["track_id"])
+    _verify_signed_request(request, track_id)
+
+    db: DB = request.app["db"]
+    track = await db.get(track_id)
+    if track is None or not track.thumb_file_id:
+        raise web.HTTPNotFound()
+
+    return await _proxy_telegram_file(
+        request,
+        track.thumb_file_id,
+        default_content_type="image/jpeg",
+        cache_seconds=86400,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +371,7 @@ def build_app(
     app.router.add_post("/api/play/url", play_url)
     app.router.add_post("/api/play/to-chat", play_to_chat)
     app.router.add_get("/api/stream/{track_id}", stream)
+    app.router.add_get("/api/thumb/{track_id}", thumb)
     return app
 
 

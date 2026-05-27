@@ -52,9 +52,9 @@ export const api = {
   search: (q: string, limit = 30) =>
     call<TrackDTO[]>(`/api/tracks/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   artists: (limit = 100) => call<ArtistDTO[]>(`/api/artists?limit=${limit}`),
-  /** Get a signed URL ready to drop into <audio src=…>. */
+  /** Get signed URLs for streaming + cover art. */
   playUrl: (track_id: number) =>
-    call<{ url: string; track_id: number }>("/api/play/url", {
+    call<{ url: string; thumb_url: string | null; track_id: number }>("/api/play/url", {
       method: "POST",
       body: JSON.stringify({ track_id }),
     }),

@@ -11,6 +11,7 @@ import { tg } from "./telegram";
 
 interface PlayerState {
   track: TrackDTO | null;
+  thumbUrl: string | null;
   isPlaying: boolean;
   position: number;
   duration: number;
@@ -33,6 +34,7 @@ export function usePlayer(): PlayerState {
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [track, setTrack] = useState<TrackDTO | null>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -43,13 +45,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     setLoading(true);
     try {
-      const { url } = await api.playUrl(t.id);
+      const { url, thumb_url } = await api.playUrl(t.id);
       const a = audioRef.current;
       if (!a) return;
+      // preload="auto" once we know what to play — iOS keeps buffering on
+      // background more reliably when data is already cached.
+      a.preload = "auto";
       a.src = url;
       a.load();
       await a.play();
       setTrack(t);
+      setThumbUrl(thumb_url);
       tg()?.HapticFeedback.impactOccurred("light");
     } catch (e) {
       setError(String(e));
@@ -83,9 +89,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       a.load();
     }
     setTrack(null);
+    setThumbUrl(null);
     setIsPlaying(false);
     setPosition(0);
     setDuration(0);
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = "none";
+    }
   }, []);
 
   // Bind audio element events to React state.
@@ -116,9 +127,82 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Media Session: tell the OS this is real media so it gets lockscreen
+  // controls (iOS Control Center, AirPods, Apple Watch, Android notif).
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    if (!track) {
+      navigator.mediaSession.metadata = null;
+      return;
+    }
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title || track.file_name || "Untitled",
+      artist: track.artist || "Unknown Artist",
+      album: track.album || "",
+      artwork: thumbUrl
+        ? [
+            { src: thumbUrl, sizes: "320x320", type: "image/jpeg" },
+            { src: thumbUrl, sizes: "640x640", type: "image/jpeg" },
+          ]
+        : [],
+    });
+
+    const a = audioRef.current;
+    const set = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
+    set("play", () => a?.play().catch(() => {}));
+    set("pause", () => a?.pause());
+    set("seekbackward", (d) => {
+      if (a) a.currentTime = Math.max(0, a.currentTime - (d.seekOffset || 10));
+    });
+    set("seekforward", (d) => {
+      if (a) a.currentTime = Math.min(a.duration || 0, a.currentTime + (d.seekOffset || 10));
+    });
+    set("seekto", (d) => {
+      if (a && d.seekTime != null) a.currentTime = d.seekTime;
+    });
+    set("stop", () => {
+      a?.pause();
+    });
+    // nexttrack/previoustrack left for when we have queue support.
+  }, [track, thumbUrl]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+  }, [isPlaying]);
+
+  // setPositionState lets the OS render an accurate scrubber on lockscreen.
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !("setPositionState" in navigator.mediaSession)) {
+      return;
+    }
+    if (!duration || !isFinite(duration)) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: audioRef.current?.playbackRate || 1,
+        position: Math.min(position, duration),
+      });
+    } catch {
+      /* iOS can throw on weird values during transitions */
+    }
+  }, [position, duration]);
+
   return (
     <PlayerCtx.Provider
-      value={{ track, isPlaying, position, duration, loading, error, play, toggle, seek, close }}
+      value={{
+        track,
+        thumbUrl,
+        isPlaying,
+        position,
+        duration,
+        loading,
+        error,
+        play,
+        toggle,
+        seek,
+        close,
+      }}
     >
       {children}
       <audio ref={audioRef} preload="none" playsInline />
