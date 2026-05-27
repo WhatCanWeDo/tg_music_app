@@ -15,6 +15,7 @@ class Config:
     web_host: str
     web_port: int
     cors_origin: str  # exact origin or "*"
+    public_base_url: str  # used to build signed stream URLs; empty = derive from request
 
 
 def load(env_file: str | Path = ".env") -> Config:
@@ -40,6 +41,7 @@ def load(env_file: str | Path = ".env") -> Config:
     web_host = os.environ.get("WEB_HOST", "127.0.0.1").strip()
     web_port = int(os.environ.get("WEB_PORT", "8080"))
     cors_origin = os.environ.get("CORS_ORIGIN", "*").strip()
+    public_base_url = os.environ.get("PUBLIC_BASE_URL", "").strip()
 
     return Config(
         bot_token=bot_token,
@@ -48,4 +50,5 @@ def load(env_file: str | Path = ".env") -> Config:
         web_host=web_host,
         web_port=web_port,
         cors_origin=cors_origin,
+        public_base_url=public_base_url,
     )

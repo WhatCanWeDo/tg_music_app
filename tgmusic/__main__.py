@@ -50,6 +50,7 @@ async def amain() -> None:
         bot_token=cfg.bot_token,
         owner_id=cfg.owner_id,
         cors_origin=cfg.cors_origin,
+        public_base_url=cfg.public_base_url,
     )
     runner = web.AppRunner(api_app)
     await runner.setup()

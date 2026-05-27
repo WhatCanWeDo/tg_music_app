@@ -52,8 +52,16 @@ export const api = {
   search: (q: string, limit = 30) =>
     call<TrackDTO[]>(`/api/tracks/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   artists: (limit = 100) => call<ArtistDTO[]>(`/api/artists?limit=${limit}`),
-  play: (track_id: number) =>
-    call<{ ok: true; track_id: number }>("/api/play", {
+  /** Get a signed URL ready to drop into <audio src=…>. */
+  playUrl: (track_id: number) =>
+    call<{ url: string; track_id: number }>("/api/play/url", {
+      method: "POST",
+      body: JSON.stringify({ track_id }),
+    }),
+  /** Send the track to the owner's chat with the bot so the native Telegram
+   *  player picks it up (lockscreen, AirPods, background — full iOS support). */
+  playToChat: (track_id: number) =>
+    call<{ ok: true; track_id: number }>("/api/play/to-chat", {
       method: "POST",
       body: JSON.stringify({ track_id }),
     }),

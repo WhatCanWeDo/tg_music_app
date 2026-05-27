@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type ArtistDTO, type TrackDTO } from "../api";
 import { TrackRow } from "../components/TrackRow";
 
-export function LibraryTab({ onPlay }: { onPlay: (id: number) => void }) {
+export function LibraryTab() {
   const [recent, setRecent] = useState<TrackDTO[] | null>(null);
   const [artists, setArtists] = useState<ArtistDTO[] | null>(null);
 
@@ -19,7 +19,7 @@ export function LibraryTab({ onPlay }: { onPlay: (id: number) => void }) {
         ) : recent.length === 0 ? (
           <Empty msg="Перешли боту трек — появится здесь." />
         ) : (
-          recent.map((t) => <TrackRow key={t.id} track={t} onPlay={onPlay} />)
+          recent.map((t) => <TrackRow key={t.id} track={t} />)
         )}
       </Section>
 

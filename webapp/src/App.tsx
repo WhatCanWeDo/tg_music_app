@@ -1,15 +1,26 @@
 import { useEffect, useState } from "react";
 import { api, type MeDTO } from "./api";
 import { isInsideTelegram, tg } from "./telegram";
+import { Player } from "./components/Player";
+import { PlayerProvider, usePlayer } from "./player";
 import { LibraryTab } from "./tabs/Library";
 import { SearchTab } from "./tabs/Search";
 
 type Tab = "library" | "search";
 
 export default function App() {
+  return (
+    <PlayerProvider>
+      <AppInner />
+    </PlayerProvider>
+  );
+}
+
+function AppInner() {
   const [tab, setTab] = useState<Tab>("library");
   const [me, setMe] = useState<MeDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { track } = usePlayer();
 
   useEffect(() => {
     if (!isInsideTelegram()) {
@@ -31,27 +42,20 @@ export default function App() {
     );
   }
 
+  // bottom padding leaves room for tab bar (56px) + player (~76px when present)
+  const bottomPad = track ? "pb-40" : "pb-20";
+
   return (
     <div className="flex flex-col h-full">
       <Header me={me} />
-      <main className="flex-1 overflow-y-auto pb-20">
-        {tab === "library" && <LibraryTab onPlay={onPlay} />}
-        {tab === "search" && <SearchTab onPlay={onPlay} />}
+      <main className={`flex-1 overflow-y-auto ${bottomPad}`}>
+        {tab === "library" && <LibraryTab />}
+        {tab === "search" && <SearchTab />}
       </main>
+      <Player />
       <TabBar tab={tab} setTab={setTab} />
     </div>
   );
-}
-
-async function onPlay(trackId: number) {
-  tg()?.HapticFeedback.impactOccurred("light");
-  try {
-    await api.play(trackId);
-    tg()?.HapticFeedback.notificationOccurred("success");
-  } catch (e) {
-    tg()?.HapticFeedback.notificationOccurred("error");
-    alert(String(e));
-  }
 }
 
 function Header({ me }: { me: MeDTO | null }) {
@@ -109,3 +113,5 @@ function fmtDuration(seconds: number): string {
   const m = Math.floor((seconds % 3600) / 60);
   return h ? `${h}ч ${m}м` : `${m}м`;
 }
+
+void tg; // keep import meaningful for future Back/Main button wiring

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type TrackDTO } from "../api";
 import { TrackRow } from "../components/TrackRow";
 
-export function SearchTab({ onPlay }: { onPlay: (id: number) => void }) {
+export function SearchTab() {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<TrackDTO[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,7 +52,7 @@ export function SearchTab({ onPlay }: { onPlay: (id: number) => void }) {
       )}
 
       {results &&
-        results.map((t) => <TrackRow key={t.id} track={t} onPlay={onPlay} />)}
+        results.map((t) => <TrackRow key={t.id} track={t} />)}
     </div>
   );
 }

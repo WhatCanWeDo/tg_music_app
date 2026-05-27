@@ -39,6 +39,7 @@ class Track:
     album: str | None
     duration_s: int | None
     file_name: str | None
+    mime_type: str | None
     thumb_file_id: str | None
 
     @property
@@ -196,5 +197,6 @@ def _row_to_track(row: aiosqlite.Row) -> Track:
         album=row["album"],
         duration_s=row["duration_s"],
         file_name=row["file_name"],
+        mime_type=row["mime_type"],
         thumb_file_id=row["thumb_file_id"],
     )
