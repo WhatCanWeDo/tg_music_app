@@ -69,6 +69,95 @@ tgmusic/
 
 База: `tgmusic.db` в корне (SQLite, configurable через `DB_PATH`).
 
+## Mini App
+
+В `webapp/` лежит React-фронт. Он рендерит библиотеку, поиск и список артистов,
+а на тап трека POST-ит в `/api/play` — бэк шлёт audio через `sendAudio` в твой
+чат с ботом, и нативный плеер Telegram играет с фоном/lockscreen.
+
+### Backend HTTP API (живёт внутри того же python-процесса)
+
+| Method | Path                    | Auth | Что делает                            |
+|--------|-------------------------|------|---------------------------------------|
+| GET    | `/health`               | —    | sanity check                          |
+| GET    | `/api/me`               | tma  | счётчики библиотеки                   |
+| GET    | `/api/tracks/recent`    | tma  | последние треки (`?limit=20`)         |
+| GET    | `/api/tracks/search`    | tma  | поиск (`?q=...&limit=30`)             |
+| GET    | `/api/artists`          | tma  | топ артистов (`?limit=100`)           |
+| POST   | `/api/play`             | tma  | `{track_id}` → sendAudio в чат owner-у |
+
+Все `/api/*` требуют заголовок `Authorization: tma <initData>`, где `initData`
+— подписанная строка от Telegram WebApp SDK. Бэк проверяет HMAC и сверяет
+`user.id` с `OWNER_ID`.
+
+### Деплой Mini App на Cloudflare Pages
+
+1. **Cloudflare аккаунт** (бесплатный) — https://dash.cloudflare.com
+2. **Workers & Pages** → Create → Pages → "Connect to Git" → выбери репо
+   `tg_music_app`
+3. **Build settings:**
+   - Framework preset: `Vite`
+   - Build command: `bun install && bun run build` (или `npm install && npm run build`)
+   - Build output directory: `webapp/dist`
+   - Root directory: `webapp`
+4. **Environment variables (Production):**
+   - `VITE_API_URL` = текущий URL cloudflared-туннеля (см. ниже как узнать)
+5. **Save & deploy.** Через минуту получишь URL вида
+   `tg-music-app.pages.dev`.
+
+После деплоя обнови **CORS_ORIGIN** на VPS на этот URL:
+```bash
+ssh personal-vps
+sed -i 's|^CORS_ORIGIN=.*|CORS_ORIGIN=https://tg-music-app.pages.dev|' /root/tg_music_app/.env
+systemctl restart tgmusic
+```
+
+### Узнать текущий URL туннеля
+
+URL `*.trycloudflare.com` пересоздаётся при каждом рестарте cloudflared
+(обычно после reboot VPS). Чтобы увидеть текущий:
+```bash
+ssh personal-vps 'journalctl -u cloudflared-tgmusic -o cat | \
+  grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" | head -1'
+```
+
+Если URL изменился — обнови `VITE_API_URL` в Cloudflare Pages (Settings →
+Environment Variables → Edit) и пересобери (Deployments → Retry latest).
+
+### Стабильный URL вместо ephemeral (для тех, у кого есть домен в Cloudflare)
+
+Поменяй `quick tunnel` на `named tunnel`:
+```bash
+ssh personal-vps
+cloudflared tunnel login    # откроет браузер
+cloudflared tunnel create tgmusic
+cloudflared tunnel route dns tgmusic api.твойдомен.com
+mkdir -p /etc/cloudflared
+cat > /etc/cloudflared/config.yml <<YAML
+tunnel: tgmusic
+credentials-file: /root/.cloudflared/<UUID>.json
+ingress:
+  - hostname: api.твойдомен.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404
+YAML
+# обнови ExecStart в /etc/systemd/system/cloudflared-tgmusic.service:
+#   ExecStart=/usr/bin/cloudflared tunnel --config /etc/cloudflared/config.yml run tgmusic
+systemctl daemon-reload && systemctl restart cloudflared-tgmusic
+```
+
+### Регистрация Mini App в @BotFather
+
+После того, как Pages выдаст URL фронта:
+
+1. В Telegram: `@BotFather` → `/mybots`
+2. Выбери `@spoty_wcwd_bot` → Bot Settings → Menu Button → Configure Menu Button
+3. Текст кнопки: `🎵 Library`
+4. URL: `https://tg-music-app.pages.dev`
+
+Теперь при открытии бота снизу есть кнопка "🎵 Library" — тап открывает
+Mini App в Telegram WebView.
+
 ## Чего ещё нет
 
 Список того, что отложено до следующих шагов:
