@@ -20,7 +20,13 @@ async def amain() -> None:
 
     cfg = config.load()
     log.info("DB: %s", cfg.db_path)
-    log.info("Owner: %s", cfg.owner_id)
+    if cfg.owner_id == 0:
+        log.warning(
+            "OWNER_ID=0 — running in DISCOVERY MODE. Send any message to the "
+            "bot to learn your Telegram ID, then set OWNER_ID and restart."
+        )
+    else:
+        log.info("Owner: %s", cfg.owner_id)
 
     db = DB(cfg.db_path)
     await db.init()

@@ -14,8 +14,27 @@ log = logging.getLogger(__name__)
 
 
 def build_router(db: DB, owner_id: int) -> Router:
-    """Build a Router whose handlers are gated to OWNER_ID."""
+    """Build a Router whose handlers are gated to OWNER_ID.
+
+    If owner_id == 0, the router runs in discovery mode: it replies to any
+    sender with their Telegram ID. Used once on first deploy to bootstrap.
+    """
     router = Router(name="tgmusic")
+
+    if owner_id == 0:
+        @router.message()
+        async def discovery(message: Message) -> None:
+            uid = message.from_user.id if message.from_user else None
+            log.warning("DISCOVERY: incoming message from user_id=%s", uid)
+            await message.answer(
+                f"👋 Discovery mode.\n\n"
+                f"Your Telegram ID: <code>{uid}</code>\n\n"
+                f"Set <code>OWNER_ID={uid}</code> in <code>.env</code> on the "
+                f"server and restart the bot.",
+                parse_mode="HTML",
+            )
+        return router
+
     router.message.filter(F.from_user.id == owner_id)
 
     @router.message(CommandStart())
